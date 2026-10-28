@@ -1,4 +1,5 @@
 
+from django.conf import settings
 from django.db import models
 
 
@@ -30,3 +31,30 @@ class Photo(models.Model):
 
     def __str__(self):
         return f"{self.original_filename or 'Photo'} - {self.event.name}"
+
+
+class SavedPhotoMatch(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="saved_photo_matches",
+    )
+    photo = models.ForeignKey(
+        Photo,
+        on_delete=models.CASCADE,
+        related_name="saved_matches",
+    )
+    similarity = models.FloatField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-similarity", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "photo"],
+                name="unique_saved_photo_match_per_user",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user} - {self.photo}"
