@@ -6,7 +6,8 @@ from .models import Event, Photo
 class EventSerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
-        fields = "__all__"
+        fields = ("id", "name", "description", "event_date", "created_at")
+        read_only_fields = ("id", "created_at")
 
 
 class PhotoSerializer(serializers.ModelSerializer):

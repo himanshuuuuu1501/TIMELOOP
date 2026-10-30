@@ -1,5 +1,6 @@
 
 import { useCallback, useEffect, useState } from "react";
+import { QRCodeSVG } from "qrcode.react";
 import {
   Heart, Images, Search, Upload, Sparkles, CalendarDays,
   ArrowUpRight, ImagePlus, LoaderCircle, X, LogIn, UserPlus,
@@ -55,7 +56,8 @@ function imageUrl(image) {
 function App() {
   const [photos, setPhotos] = useState([]);
   const [events, setEvents] = useState([]);
-  const [selectedEvent, setSelectedEvent] = useState("");
+  const [selectedEvent, setSelectedEvent] = useState(() => localStorage.getItem("timeloop_guest_event_id") || "");
+  const [guestJoined, setGuestJoined] = useState(() => Boolean(localStorage.getItem("timeloop_guest_event_id")));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("gallery");
@@ -100,6 +102,8 @@ function App() {
   const [selectedAdminFiles, setSelectedAdminFiles] = useState([]);
   const [adminPhotos, setAdminPhotos] = useState([]);
   const [adminPhotoEvent, setAdminPhotoEvent] = useState("");
+  const [eventQrLinks, setEventQrLinks] = useState({});
+  const [joiningEvent, setJoiningEvent] = useState(false);
 
   const loadGallery = useCallback(async (eventId = "") => {
     setLoading(true);
@@ -186,6 +190,46 @@ function App() {
     loadGallery();
   }, [loadGallery]);
 
+  // Restore the guest's last joined event after a page refresh.
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("join");
+    const rememberedEventId = localStorage.getItem("timeloop_guest_event_id");
+    if (!token && rememberedEventId) {
+      setGuestJoined(true);
+      setSelectedEvent(rememberedEventId);
+      loadGallery(rememberedEventId);
+    }
+  }, [loadGallery]);
+
+  // A QR invitation carries a one-time-to-session event token in the URL.
+  useEffect(() => {
+    const token = new URLSearchParams(window.location.search).get("join");
+    if (!token) return;
+
+    let cancelled = false;
+    (async () => {
+      setJoiningEvent(true);
+      try {
+        const response = await postApi(`${API}/api/events/join/`, { token });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Could not join this event.");
+        if (cancelled) return;
+        setSelectedEvent(String(data.event.id));
+        setGuestJoined(true);
+        localStorage.setItem("timeloop_guest_event_id", String(data.event.id));
+        setActiveTab("gallery");
+        setUploadMessage(data.message || `You joined ${data.event.name}. You can now upload photos.`);
+        await loadGallery(String(data.event.id));
+        window.history.replaceState({}, "", window.location.pathname);
+      } catch (err) {
+        if (!cancelled) setUploadMessage(err.message || "Could not join this event.");
+      } finally {
+        if (!cancelled) setJoiningEvent(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loadGallery]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -213,6 +257,31 @@ function App() {
     if (user) loadSavedMatches();
     else setSavedMatches([]);
   }, [user, loadSavedMatches]);
+
+  // Keep navigation tabs focused on the section they control.
+  useEffect(() => {
+    const targetIds = {
+      gallery: "gallery",
+      upload: "upload-panel",
+      find: "find-panel",
+      explore: "explore-panel",
+      saved: "saved-panel",
+      admin: "admin-dashboard",
+      account: "account-panel",
+    };
+
+    const targetId = targetIds[activeTab];
+    if (!targetId) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activeTab]);
 
   function chooseEvent(eventId) {
     setSelectedEvent(eventId);
@@ -272,9 +341,8 @@ function App() {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
 
-    if (!user) {
-      setUploadMessage("Please log in before uploading photos.");
-      setActiveTab("account");
+    if (!user && !guestJoined) {
+      setUploadMessage("Scan this event's QR code before uploading photos.");
       return;
     }
 
@@ -543,6 +611,18 @@ function App() {
     }
   }
 
+  async function generateEventQr(event) {
+    try {
+      const response = await postApi(`${API}/api/events/${event.id}/invite/`, {});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.detail || data.error || "Could not generate event QR code.");
+      const joinUrl = `${window.location.origin}/?join=${encodeURIComponent(data.token)}`;
+      setEventQrLinks((current) => ({ ...current, [event.id]: joinUrl }));
+    } catch (err) {
+      setAdminMessage(err.message || "Could not generate event QR code.");
+    }
+  }
+
   function startEditEvent(event) {
     setEditingEventId(event.id);
     setEventName(event.name || "");
@@ -694,9 +774,10 @@ function App() {
     );
   }
 
-  if (!user) {
+  if (!user && !guestJoined) {
     return (
       <div className="app-shell">
+        {joiningEvent && <div className="feedback-message">Joining your wedding event...</div>}
         <header className="topbar">
           <a className="brand" href="#login">
             <span className="brand-icon"><Heart size={19} /></span>
@@ -834,7 +915,7 @@ function App() {
           >
             My Memories
           </button>
-          {user.is_admin && (
+          {user?.is_admin && (
             <button
               className={activeTab === "admin" ? "nav-link active" : "nav-link"}
               onClick={() => {
@@ -852,28 +933,34 @@ function App() {
         </nav>
 
         <div className="account-actions">
-          <button className="share-button" onClick={() => setActiveTab("account")}>
-            <UserRound size={16} /><span>{user.username}</span>
-          </button>
-          <button className="outline-button" onClick={logoutUser}>
-            <LogOut size={15} /> Log out
-          </button>
+          {user ? (
+            <>
+              <button className="share-button" onClick={() => setActiveTab("account")}>
+                <UserRound size={16} /><span>{user.username}</span>
+              </button>
+              <button className="outline-button" onClick={logoutUser}>
+                <LogOut size={15} /> Log out
+              </button>
+            </>
+          ) : (
+            <span className="guest-access-label">Guest access</span>
+          )}
         </div>
       </header>
 
       <main id="home">
         {activeTab === "account" ? (
-          <section className="auth-section">
+          <section className="auth-section" id="account-panel">
             <div className="auth-card">
               <div className="eyebrow"><Heart size={14} /> YOUR MEMORIES, YOUR ACCOUNT</div>
               <h1>Welcome <em>back.</em></h1>
               <p className="section-description">
-                You are signed in as {user.username}.
+                {user ? `You are signed in as ${user.username}.` : "You joined this event as a guest. Sign in to use personal photo search and saved memories."}
               </p>
               {authMessage && <p className="feedback-message">{authMessage}</p>}
             </div>
           </section>
-        ) : activeTab === "admin" && user.is_admin ? (
+        ) : activeTab === "admin" && user?.is_admin ? (
           <section className="admin-section" id="admin-dashboard">
             <div className="admin-heading">
               <div>
@@ -986,8 +1073,26 @@ function App() {
                               {event.event_date || "Date not set"} · {count} photo{count === 1 ? "" : "s"}
                             </span>
                             {event.description && <p>{event.description}</p>}
+                            {eventQrLinks[event.id] && (
+                              <div className="event-qr-panel">
+                                <QRCodeSVG value={eventQrLinks[event.id]} size={144} level="M" />
+                                <span>Scan to join {event.name}</span>
+                                <button type="button" className="text-button" onClick={() => navigator.clipboard?.writeText(eventQrLinks[event.id])}>
+                                  Copy invitation link
+                                </button>
+                              </div>
+                            )}
                           </div>
                           <div className="admin-row-actions">
+                            <button
+                              className="icon-action"
+                              title="Generate guest QR code"
+                              aria-label={`Generate QR code for ${event.name}`}
+                              onClick={() => generateEventQr(event)}
+                              disabled={adminBusy}
+                            >
+                              <Images size={15} />
+                            </button>
                             <button
                               className="icon-action"
                               title="Edit event"
@@ -1022,7 +1127,7 @@ function App() {
                   <h2>Add photos to an event</h2>
                   <p className="section-description">
                     Choose an event and select multiple photos. Uploaded photos
-                    will appear in that event's shared gallery for all logged-in users.
+                    will appear in that event's shared gallery for guests who scan its QR code.
                   </p>
                 </div>
                 <Upload size={22} />
@@ -1193,7 +1298,7 @@ function App() {
 
             <section className="gallery-section" id="gallery">
               {activeTab === "explore" ? (
-                <section className="moment-search-section">
+                <section className="moment-search-section" id="explore-panel">
                   <div className="moment-search-intro">
                     <div className="eyebrow"><Sparkles size={14} /> SEARCH THE STORY, NOT JUST THE PHOTO</div>
                     <h2>Relive a <em>moment.</em></h2>
@@ -1404,7 +1509,7 @@ function App() {
                   </section>
                 </section>
               ) : activeTab === "saved" ? (
-                <>
+                <div id="saved-panel">
                   <div className="section-heading">
                     <div>
                       <div className="eyebrow">YOUR PERSONAL COLLECTION</div>
@@ -1452,7 +1557,7 @@ function App() {
                       ))}
                     </div>
                   )}
-                </>
+                </div>
               ) : (
                 <>
                   <div className="section-heading">
@@ -1490,7 +1595,7 @@ function App() {
                   )}
 
                   {activeTab === "upload" && (
-                    <section className="action-panel">
+                    <section className="action-panel" id="upload-panel">
                       <button
                         className="panel-close"
                         onClick={() => setActiveTab("gallery")}
@@ -1512,7 +1617,7 @@ function App() {
                           accept="image/*"
                           multiple
                           onChange={uploadPhotos}
-                          disabled={uploading || !user || !selectedEvent}
+                          disabled={uploading || (!user && !guestJoined) || !selectedEvent}
                         />
                       </label>
                       {uploadMessage && <p className="feedback-message">{uploadMessage}</p>}
@@ -1520,7 +1625,7 @@ function App() {
                   )}
 
                   {activeTab === "find" && (
-                    <section className="action-panel">
+                    <section className="action-panel" id="find-panel">
                       <button
                         className="panel-close"
                         onClick={() => setActiveTab("gallery")}

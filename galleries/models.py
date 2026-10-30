@@ -1,12 +1,14 @@
 
 from django.conf import settings
 from django.db import models
+import uuid
 
 
 class Event(models.Model):
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
     event_date = models.DateField(null=True, blank=True)
+    join_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

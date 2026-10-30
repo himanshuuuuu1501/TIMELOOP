@@ -771,3 +771,17 @@ h1 em, h2 em { color: var(--accent); font-weight: 500; }
     grid-template-columns: 1fr;
   }
 }
+
+
+/* QR invitation panel */
+.event-qr-panel { display: grid; justify-items: start; gap: 8px; margin-top: 12px; padding: 12px; width: fit-content; background: #fff; border: 1px solid var(--line); }
+.event-qr-panel svg { display: block; max-width: 100%; height: auto; }
+.event-qr-panel span { color: var(--muted); font-size: 11px; }
+.event-qr-panel .text-button { padding: 0; color: var(--accent); }
+
+.guest-access-label { color: var(--muted); font-size: 12px; }
+
+/* Smooth tab navigation targets */
+#gallery, #upload-panel, #find-panel, #explore-panel, #saved-panel, #admin-dashboard, #account-panel {
+  scroll-margin-top: 28px;
+}
