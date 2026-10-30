@@ -1,3 +1,4 @@
+import itertools
 
 from PIL import Image, UnidentifiedImageError
 from rest_framework import status
@@ -469,7 +470,7 @@ class SceneSearchView(APIView):
             reverse=True
         )
 
-        # Detect an explicitly requested number of people.
+        # Detect an explicitly requested exact number of people.
         number_words = {
             "one": 1, "two": 2, "three": 3, "four": 4,
             "five": 5, "six": 6, "seven": 7, "eight": 8,
@@ -480,9 +481,8 @@ class SceneSearchView(APIView):
         }
         number_pattern = r"(\d{1,2}|" + "|".join(number_words) + r")"
         count_match = re.search(
-            r"\b" + number_pattern
-            + r"\s+(?:people|persons|person|men|women|guests|individuals)\b",
-            query.lower(),
+            r"\b" + number_pattern + r"\s+(?:people|persons|person|men|women|guests|individuals)\b",
+            query.lower()
         )
 
         requested_people_count = None
@@ -492,153 +492,336 @@ class SceneSearchView(APIView):
                 int(raw_count) if raw_count.isdigit() else number_words[raw_count]
             )
 
-        # Build a small action vocabulary. Gemini's fields can vary between
-        # "action", "description", "people_count", and "people_involved".
-        action_aliases = {
-            "hug": {"hug", "hugging", "embrace", "embracing"},
-            "hugging": {"hug", "hugging", "embrace", "embracing"},
-            "embrace": {"hug", "hugging", "embrace", "embracing"},
-            "kiss": {"kiss", "kissing"},
-            "kissing": {"kiss", "kissing"},
-            "cry": {"cry", "crying", "weeping", "sobbing", "tears"},
-            "crying": {"cry", "crying", "weeping", "sobbing", "tears"},
-            "dance": {"dance", "dancing"},
-            "dancing": {"dance", "dancing"},
-            "stand": {"stand", "standing"},
-            "standing": {"stand", "standing"},
-            "sit": {"sit", "sitting", "seated"},
-            "sitting": {"sit", "sitting", "seated"},
-            "laugh": {"laugh", "laughing", "laughter"},
-            "laughing": {"laugh", "laughing", "laughter"},
-            "smile": {"smile", "smiling"},
-            "smiling": {"smile", "smiling"},
-            "pose": {"pose", "posing"},
-            "posing": {"pose", "posing"},
-        }
-
-        ignored_words = {
-            "a", "an", "the", "is", "are", "was", "were", "in", "on",
-            "at", "of", "to", "with", "and", "during", "for", "from",
-            "by", "someone", "somebody", "people", "person", "persons",
-            "men", "women", "guests", "individuals", "exactly",
-        }
-        query_tokens = set(re.findall(r"[a-z]+", query.lower()))
-        requested_action_tokens = query_tokens - ignored_words
-        requested_action_tokens -= set(number_words.keys())
-        requested_action_tokens -= {str(n) for n in range(1, 21)}
-
-        expanded_action_tokens = set()
-        for token in requested_action_tokens:
-            expanded_action_tokens.update(action_aliases.get(token, {token}))
-
-        def gemini_action_matches(photo_id):
-            analysis = scene_analyses.get(photo_id)
-            if not analysis:
-                return False
-
-            text_parts = [
-                analysis.description or "",
-                analysis.search_text or "",
-            ]
-            actions_data = analysis.actions if isinstance(analysis.actions, list) else []
-            for action_item in actions_data:
-                if isinstance(action_item, dict):
-                    text_parts.extend([
-                        str(action_item.get("action", "")),
-                        str(action_item.get("description", "")),
-                        str(action_item.get("details", "")),
-                    ])
-                elif isinstance(action_item, str):
-                    text_parts.append(action_item)
-
-            scene_tokens = set(
-                re.findall(r"[a-z]+", " ".join(text_parts).lower())
-            )
-            return bool(expanded_action_tokens.intersection(scene_tokens))
-
+        # Keep the existing flexible ranking for ordinary natural-language searches.
         query_lower = query.lower()
-        interaction_terms = {
+        interaction_terms = [
             "kiss", "kissing", "hug", "hugging", "embrace",
             "cry", "crying", "laugh", "laughing", "dance",
-            "dancing", "smile", "smiling", "garland", "vidaai",
-            "farewell", "posing", "pose", "standing", "sitting",
-        }
-        is_interaction_search = bool(
-            interaction_terms.intersection(query_tokens)
+            "dancing", "smile", "smiling", "garland",
+            "vidaai", "farewell"
+        ]
+        is_interaction_search = any(
+            term in query_lower for term in interaction_terms
         )
 
         if requested_people_count is not None:
-            # First choice: photos with a confident Gemini count AND matching
-            # action evidence. Never treat YOLO boxes as an exact people count.
-            verified_matches = []
-            for item in results:
-                count_is_verified = (
+            # If an exact count is requested, do not allow CLIP-only or
+            # unindexed photos through. Gemini count confidence must be >= 0.75.
+            filtered_results = [
+                item for item in results
+                if (
                     item["scene_indexed"]
                     and item["visible_people_count"] == requested_people_count
                     and item["people_count_confidence"] >= 0.75
                 )
-                action_is_verified = (
-                    not expanded_action_tokens
-                    or gemini_action_matches(item["photo_id"])
-                )
-                if count_is_verified and action_is_verified:
-                    item["people_count_verified"] = True
-                    item["count_note"] = "People count is supported by scene analysis."
-                    verified_matches.append(item)
+            ]
 
-            if verified_matches:
-                filtered_results = verified_matches
-            else:
-                # Important: do not return zero just because most of the gallery
-                # has not received Gemini analysis yet. Return visual candidates,
-                # clearly marked as NOT count-verified.
-                filtered_results = [
-                    item for item in results
-                    if item["similarity"] >= 0.20
-                    and (
-                        not is_interaction_search
-                        or item["scene_score"] >= 0.15
-                        or item["similarity"] >= 0.22
-                    )
-                ]
+            # If the query also names an action, require that action to appear
+            # in Gemini's saved action/description/scene text.
+            person_words = {
+                "people", "person", "persons", "man", "men", "woman",
+                "women", "guest", "guests", "individual", "individuals"
+            }
+            action_words = set(re.findall(r"[a-z]+", query_lower))
+            action_words -= person_words
+            action_words -= set(number_words)
+            action_words -= {
+                "a", "an", "the", "is", "are", "was", "were", "in",
+                "on", "at", "of", "to", "with", "and", "someone",
+                "somebody", "who", "that", "exactly"
+            }
+            action_aliases = {
+                "hug": {"hug", "hugging", "embrace", "embracing"},
+                "hugging": {"hug", "hugging", "embrace", "embracing"},
+                "kiss": {"kiss", "kissing"},
+                "kissing": {"kiss", "kissing"},
+                "stand": {"stand", "standing"},
+                "standing": {"stand", "standing"},
+                "sit": {"sit", "sitting", "seated"},
+                "sitting": {"sit", "sitting", "seated"},
+                "dance": {"dance", "dancing"},
+                "dancing": {"dance", "dancing"},
+                "smile": {"smile", "smiling"},
+                "smiling": {"smile", "smiling"},
+                "laugh": {"laugh", "laughing", "laughter"},
+                "laughing": {"laugh", "laughing", "laughter"},
+                "cry": {"cry", "crying", "weeping", "sobbing"},
+                "crying": {"cry", "crying", "weeping", "sobbing"},
+                "pose": {"pose", "posing"},
+                "posing": {"pose", "posing"},
+            }
+
+            requested_action_terms = set()
+            for word in action_words:
+                requested_action_terms.update(action_aliases.get(word, {word}))
+
+            if requested_action_terms:
+                strict_matches = []
                 for item in filtered_results:
-                    item["people_count_verified"] = False
-                    item["count_note"] = (
-                        f"Requested count: {requested_people_count}. "
-                        "This photo has not been verified for that exact count."
-                    )
-        else:
-            # Prefer Gemini-supported scene matches. If no indexed scene matches
-            # strongly enough, use CLIP's best visual candidates as a fallback
-            # rather than claiming that no moment exists.
-            if is_interaction_search:
-                filtered_results = [
-                    item for item in results
-                    if item["scene_score"] >= 0.20
+                    analysis = scene_analyses.get(item["photo_id"])
+                    if not analysis:
+                        continue
+
+                    action_text_parts = [analysis.description or "", analysis.search_text or ""]
+                    actions_data = analysis.actions if isinstance(analysis.actions, list) else []
+                    for action_item in actions_data:
+                        if isinstance(action_item, dict):
+                            action_text_parts.extend([
+                                str(action_item.get("action", "")),
+                                str(action_item.get("description", "")),
+                                str(action_item.get("details", "")),
+                            ])
+                        elif isinstance(action_item, str):
+                            action_text_parts.append(action_item)
+
+                    action_text = " ".join(action_text_parts).lower()
+                    action_text_words = set(re.findall(r"[a-z]+", action_text))
+                    if requested_action_terms.intersection(action_text_words):
+                        strict_matches.append(item)
+
+                filtered_results = strict_matches
+
+        elif is_interaction_search:
+            filtered_results = [
+                item for item in results
+                if (
+                    item["scene_score"] >= 0.30
                     or item["similarity"] >= 0.235
-                ]
-            else:
-                filtered_results = [
-                    item for item in results
-                    if item["scene_score"] >= 0.20
-                    or item["similarity"] >= 0.25
-                ]
+                )
+            ]
+        else:
+            filtered_results = [
+                item for item in results
+                if (
+                    item["scene_score"] >= 0.30
+                    or item["similarity"] >= 0.27
+                )
+            ]
 
-            if not filtered_results:
-                fallback_floor = 0.18
-                filtered_results = [
-                    item for item in results
-                    if item["similarity"] >= fallback_floor
-                ]
-                for item in filtered_results:
-                    item["visual_similarity_only"] = True
+        return Response({
+                "query": query,
+                "event_id": event_id,
+                "photos_checked": len(results),
+                "gemini_analyses_available": len(scene_analyses),
+                "ranking_method": "Gemini scene descriptions + CLIP + YOLO",
+                "exact_people_count_filter": requested_people_count,
+                "results": filtered_results[:5],
+                "matches_found": len(filtered_results[:5]),
+                "total_candidates": len(filtered_results),
+            })
 
-        # Keep the strongest results first. Count-verified results are ranked
-        # by the same hybrid score as all other results.
-        filtered_results.sort(
+
+class PersonMomentSearchView(APIView):
+    """
+    Find photos containing every selected reference identity.
+    Face identities are matched to distinct detected faces in each candidate.
+    Available scene analysis is then used to rank action relevance.
+    """
+    parser_classes = [MultiPartParser, FormParser]
+    permission_classes = [IsAuthenticated]
+
+    ACTION_GROUPS = {
+        "hugging": {"hug", "hugs", "hugging", "embrace", "embracing", "cuddle", "cuddling"},
+        "kissing": {"kiss", "kisses", "kissing", "peck"},
+        "dancing": {"dance", "dances", "dancing"},
+        "crying": {"cry", "cries", "crying", "weeping", "sobbing", "tears"},
+        "laughing": {"laugh", "laughs", "laughing", "laughter", "giggle", "giggling"},
+        "smiling": {"smile", "smiles", "smiling", "grinning"},
+        "standing": {"stand", "stands", "standing", "stood"},
+        "sitting": {"sit", "sits", "sitting", "seated"},
+        "posing": {"pose", "poses", "posing", "photographed", "photograph"},
+        "walking": {"walk", "walks", "walking"},
+        "talking": {"talk", "talks", "talking", "chat", "chatting", "conversation"},
+        "feeding": {"feed", "feeds", "feeding"},
+        "waving": {"wave", "waves", "waving"},
+    }
+
+    def post(self, request):
+        query = request.data.get("query", "").strip()
+        event_id = request.data.get("event_id")
+        try:
+            requested_count = int(request.data.get("person_count", 0))
+        except (TypeError, ValueError):
+            requested_count = 0
+
+        if requested_count == 0:
+            # Backward compatibility with the original two-person frontend.
+            requested_count = 2 if (
+                request.FILES.get("person_one") and request.FILES.get("person_two")
+            ) else 0
+
+        if requested_count < 2 or requested_count > 4:
+            return Response(
+                {"error": "Choose between 2 and 4 people."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not query:
+            return Response(
+                {"error": "Describe the moment you want to find."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        references = []
+        for index in range(1, requested_count + 1):
+            uploaded = request.FILES.get(f"person_{index}")
+            if uploaded is None and index == 1:
+                uploaded = request.FILES.get("person_one")
+            if uploaded is None and index == 2:
+                uploaded = request.FILES.get("person_two")
+
+            if uploaded is None:
+                return Response(
+                    {"error": f"Please upload a reference photo for Person {index}."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                image = Image.open(uploaded).convert("RGB")
+            except (UnidentifiedImageError, OSError):
+                return Response(
+                    {"error": f"Person {index}'s reference file is not a valid image."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            detected = extract_face_embeddings(image)
+            if not detected:
+                return Response(
+                    {"error": f"No face was detected in Person {index}'s reference photo."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            references.append(detected[0])
+
+        photos = Photo.objects.select_related("event").all()
+        if event_id:
+            try:
+                photos = photos.filter(event_id=int(event_id))
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "event_id must be a valid integer."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        analyses = {
+            item.photo_id: item
+            for item in PhotoSceneAnalysis.objects.filter(photo__in=photos)
+        }
+
+        # Expand common action phrases into their related forms.
+        query_tokens = set(re.findall(r"[a-z]+", query.lower()))
+        matched_action_groups = [
+            (group_name, vocab)
+            for group_name, vocab in self.ACTION_GROUPS.items()
+            if query_tokens.intersection(vocab)
+        ]
+        requested_action_vocab = set().union(
+            *(vocab for _, vocab in matched_action_groups)
+        ) if matched_action_groups else set()
+
+        results = []
+        checked = 0
+
+        for photo in photos.iterator():
+            checked += 1
+            try:
+                with Image.open(photo.image.path) as stored:
+                    candidate_faces = extract_face_embeddings(stored.convert("RGB"))
+            except (OSError, ValueError, UnidentifiedImageError):
+                continue
+
+            # Each requested identity must map to a DIFFERENT face in the photo.
+            # This prevents one detected face from satisfying multiple people.
+            if len(candidate_faces) < requested_count:
+                continue
+
+            best_assignment = None
+            best_key = None
+            for assignment in itertools.permutations(candidate_faces, requested_count):
+                scores = [
+                    compare_embeddings(reference, candidate_face)
+                    for reference, candidate_face in zip(references, assignment)
+                ]
+                key = (min(scores), sum(scores) / len(scores))
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best_assignment = scores
+
+            if not best_assignment or any(
+                score < SIMILARITY_THRESHOLD for score in best_assignment
+            ):
+                continue
+
+            analysis = analyses.get(photo.id)
+            scene_parts = []
+            if analysis:
+                scene_parts.extend([
+                    analysis.description or "",
+                    analysis.search_text or "",
+                ])
+                if isinstance(analysis.actions, list):
+                    for action in analysis.actions:
+                        if isinstance(action, dict):
+                            scene_parts.extend([
+                                str(action.get("action", "")),
+                                str(action.get("description", "")),
+                                str(action.get("details", "")),
+                            ])
+                        elif isinstance(action, str):
+                            scene_parts.append(action)
+
+            scene_text = " ".join(scene_parts).lower()
+            scene_tokens = set(re.findall(r"[a-z]+", scene_text))
+
+            # Score action relevance by semantic action-family evidence.
+            matched_groups = []
+            for group_name, vocabulary in matched_action_groups:
+                if scene_tokens.intersection(vocabulary):
+                    matched_groups.append(group_name)
+
+            action_score = (
+                len(matched_groups) / len(matched_action_groups)
+                if matched_action_groups else 0.0
+            )
+            action_verified = bool(matched_groups) if matched_action_groups else False
+            identity_min = min(best_assignment)
+            identity_average = sum(best_assignment) / len(best_assignment)
+
+            # Identity is the hard requirement. Action evidence affects ranking,
+            # but unindexed photos remain visible and are labelled unverified.
+            ranking_score = identity_min * 0.75 + identity_average * 0.25
+            if matched_action_groups:
+                ranking_score += action_score * 0.18
+
+            results.append({
+                "photo_id": photo.id,
+                "event_id": photo.event_id,
+                "event_name": photo.event.name,
+                "filename": photo.original_filename,
+                "image_url": request.build_absolute_uri(photo.image.url),
+                "people_count_required": requested_count,
+                "people_found": requested_count,
+                "person_similarities": [round(score, 4) for score in best_assignment],
+                "minimum_person_similarity": round(identity_min, 4),
+                "all_people_verified": True,
+                "scene_indexed": analysis is not None,
+                "action_verified": action_verified,
+                "matched_actions": matched_groups,
+                "action_score": round(action_score, 3),
+                "scene_description": (analysis.description[:300] if analysis else ""),
+                "ranking_score": round(ranking_score, 4),
+                "verification_note": (
+                    "All selected people matched distinct faces. Scene analysis supports "
+                    "the requested action."
+                    if action_verified else
+                    "All selected people matched distinct faces. The requested action "
+                    "could not be verified from available scene analysis."
+                ),
+            })
+
+        results.sort(
             key=lambda item: (
-                item.get("people_count_verified", False),
-                item["hybrid_score"],
+                item["action_verified"],
+                item["action_score"],
+                item["ranking_score"],
             ),
             reverse=True,
         )
@@ -646,16 +829,13 @@ class SceneSearchView(APIView):
         return Response({
             "query": query,
             "event_id": event_id,
-            "photos_checked": len(results),
-            "gemini_analyses_available": len(scene_analyses),
-            "ranking_method": "Gemini scene evidence + CLIP visual retrieval + YOLO object evidence",
-            "exact_people_count_filter": requested_people_count,
-            "count_filter_mode": (
-                "verified_only_when_available_with_unverified_visual_fallback"
-                if requested_people_count is not None
-                else None
+            "people_required": requested_count,
+            "photos_checked": checked,
+            "gemini_analyses_available": len(analyses),
+            "candidate_photos_with_all_people": len(results),
+            "results": results[:30],
+            "message": (
+                f"Every result contains all {requested_count} selected people. "
+                "Action relevance is ranked using available scene descriptions."
             ),
-            "results": filtered_results[:5],
-            "matches_found": len(filtered_results[:5]),
-            "total_candidates": len(filtered_results),
         })

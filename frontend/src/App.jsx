@@ -67,6 +67,12 @@ function App() {
   const [sceneResults, setSceneResults] = useState([]);
   const [sceneSearching, setSceneSearching] = useState(false);
   const [sceneMessage, setSceneMessage] = useState("");
+  const [personReferencePhotos, setPersonReferencePhotos] = useState([null, null]);
+  const [personCount, setPersonCount] = useState(2);
+  const [personMomentQuery, setPersonMomentQuery] = useState("");
+  const [personMomentResults, setPersonMomentResults] = useState([]);
+  const [personMomentBusy, setPersonMomentBusy] = useState(false);
+  const [personMomentMessage, setPersonMomentMessage] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
 
@@ -409,6 +415,61 @@ function App() {
       setSceneMessage(err.message || "Something went wrong while searching.");
     } finally {
       setSceneSearching(false);
+    }
+  }
+
+
+  async function searchPersonMoment(event) {
+    event.preventDefault();
+
+    const selectedPeople = personReferencePhotos.slice(0, personCount);
+    const missingIndex = selectedPeople.findIndex((photo) => !photo);
+    if (missingIndex !== -1) {
+      setPersonMomentMessage(`Choose a reference photo for Person ${missingIndex + 1}.`);
+      return;
+    }
+    if (!personMomentQuery.trim()) {
+      setPersonMomentMessage("Describe the moment you want to find.");
+      return;
+    }
+
+    setPersonMomentBusy(true);
+    setPersonMomentMessage("");
+    setPersonMomentResults([]);
+
+    try {
+      const formData = new FormData();
+      formData.append("person_count", String(personCount));
+      selectedPeople.forEach((file, index) => {
+        formData.append(`person_${index + 1}`, file);
+      });
+      formData.append("query", personMomentQuery.trim());
+      if (selectedEvent) formData.append("event_id", selectedEvent);
+
+      const response = await postApi(
+        `${API}/api/search/person-moment-search/`,
+        formData,
+        true
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || data.detail || "Person + moment search failed.");
+      }
+
+      setPersonMomentResults((data.results || []).map((photo) => ({
+        ...photo,
+        imageUrl: photo.image_url || photo.imageUrl,
+      })));
+
+      setPersonMomentMessage(
+        data.results?.length
+          ? `Found ${data.results.length} photos containing all ${personCount} selected people.`
+          : `No photos containing all ${personCount} selected people were found. Try clearer reference photos or check the event filter.`
+      );
+    } catch (err) {
+      setPersonMomentMessage(err.message || "Search failed.");
+    } finally {
+      setPersonMomentBusy(false);
     }
   }
 
@@ -1177,6 +1238,9 @@ function App() {
                     </div>
                   </form>
 
+
+
+
                   <div className="moment-suggestions">
                     <span>TRY SEARCHING</span>
                     {["People dancing", "Someone hugging the bride", "Friends laughing together", "A cat in the wedding"].map((suggestion) => (
@@ -1234,6 +1298,110 @@ function App() {
                       </div>
                     </div>
                   )}
+                  
+                  <section className="person-moment-panel">
+                    <div className="eyebrow"><Sparkles size={14} /> PERSON + MOMENT SEARCH</div>
+                    <h3>Find a moment <em>with someone.</em></h3>
+                    <p className="section-description">
+                      Choose 2 to 4 people. Every selected person must appear in the same photograph.
+                    </p>
+                    <form className="person-moment-form" onSubmit={searchPersonMoment}>
+                      <label className="person-count-control">
+                        How many people should be in the photo?
+                        <select
+                          value={personCount}
+                          onChange={(e) => {
+                            const nextCount = Number(e.target.value);
+                            setPersonCount(nextCount);
+                            setPersonReferencePhotos((current) => {
+                              const next = [...current];
+                              while (next.length < nextCount) next.push(null);
+                              return next.slice(0, nextCount);
+                            });
+                            setPersonMomentResults([]);
+                            setPersonMomentMessage("");
+                          }}
+                        >
+                          <option value={2}>2 people</option>
+                          <option value={3}>3 people</option>
+                          <option value={4}>4 people</option>
+                        </select>
+                      </label>
+                      <div className="person-reference-grid">
+                        {Array.from({ length: personCount }, (_, index) => (
+                          <label className="person-reference-upload" key={index}>
+                            <span>PERSON {index + 1}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0] || null;
+                                setPersonReferencePhotos((current) => {
+                                  const next = [...current];
+                                  next[index] = file;
+                                  return next;
+                                });
+                              }}
+                            />
+                            <small>{personReferencePhotos[index]?.name || "Choose a clear face photo"}</small>
+                          </label>
+                        ))}
+                      </div>
+                      <input
+                        type="text"
+                        value={personMomentQuery}
+                        onChange={(e) => setPersonMomentQuery(e.target.value)}
+                        placeholder="e.g. hugging, dancing together, standing side by side"
+                        maxLength={300}
+                      />
+                      <button
+                        className="primary-button"
+                        type="submit"
+                        disabled={
+                          personMomentBusy ||
+                          personReferencePhotos.slice(0, personCount).some((photo) => !photo) ||
+                          !personMomentQuery.trim()
+                        }
+                      >
+                        {personMomentBusy ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />}
+                        {personMomentBusy ? "Finding your moment..." : "Find this moment"}
+                      </button>
+                    </form>
+                    {personMomentMessage && (
+                      <p className="moment-feedback" role="status">{personMomentMessage}</p>
+                    )}
+                    {personMomentBusy && (
+                      <div className="loading-state moment-loading">
+                        <LoaderCircle className="spin" size={24} />
+                        <p>Checking that every selected person appears in each photo...</p>
+                      </div>
+                    )}
+                    {!personMomentBusy && personMomentResults.length > 0 && (
+                      <div className="moment-results">
+                        <h4>{personMomentResults.length} photos contain all {personCount} people</h4>
+                        <div className="photo-grid">
+                          {personMomentResults.map((photo) => (
+                            <article className="photo-card" key={photo.photo_id}>
+                              <div className="photo-frame">
+                                <img src={photo.imageUrl} alt={photo.filename || "Matching moment"} loading="lazy" />
+                              </div>
+                              <div className="photo-card-caption">
+                                <span>{photo.filename || "Wedding memory"}</span>
+                                <button className="download-button" onClick={() => downloadPhoto(photo)}>
+                                  <Download size={15} /> Download
+                                </button>
+                              </div>
+                              <p className="person-moment-evidence">
+                                {photo.action_verified
+                                  ? `Action evidence: ${photo.matched_actions.join(", ")}`
+                                  : "All selected people identified. Requested action not verified by scene analysis."}
+                              </p>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </section>
                 </section>
               ) : activeTab === "saved" ? (
                 <>

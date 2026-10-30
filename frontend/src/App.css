@@ -671,3 +671,103 @@ h1 em, h2 em { color: var(--accent); font-weight: 500; }
   .moment-search-input-row .primary-button { width: 100%; }
   .moment-search-options { align-items: flex-start; flex-direction: column; }
 }
+
+
+/* Person + Moment Search */
+.person-moment-panel {
+  margin: 30px 0;
+  padding: 28px;
+  border: 1px solid var(--border, #e7e1dc);
+  border-radius: 20px;
+  background: var(--surface, #fff);
+}
+.person-moment-panel h3 {
+  margin: 10px 0 8px;
+  font-size: clamp(1.5rem, 3vw, 2rem);
+}
+.person-moment-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 20px;
+}
+.person-reference-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.person-reference-upload {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border: 1px dashed var(--border, #d8d1ca);
+  border-radius: 14px;
+  background: #faf8f6;
+  cursor: pointer;
+}
+.person-reference-upload span {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.person-reference-upload input {
+  max-width: 100%;
+}
+.person-reference-upload small {
+  color: #77716b;
+  overflow-wrap: anywhere;
+}
+.person-moment-form > input[type="text"] {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #ded8d2);
+  border-radius: 12px;
+  font: inherit;
+}
+.person-moment-evidence {
+  margin: 8px 12px 14px;
+  color: #716b65;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+@media (max-width: 640px) {
+  .person-reference-grid {
+    grid-template-columns: 1fr;
+  }
+  .person-moment-panel {
+    padding: 18px;
+  }
+}
+
+
+.person-count-control {
+  display: grid;
+  gap: 8px;
+  max-width: 320px;
+  color: #625c56;
+  font-size: 0.9rem;
+}
+.person-count-control select {
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid var(--border, #ded8d2);
+  border-radius: 10px;
+  background: #fff;
+  color: #28251f;
+  font: inherit;
+}
+.person-reference-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.person-reference-upload {
+  min-width: 0;
+}
+.person-reference-upload input {
+  width: 100%;
+  font-size: 0.82rem;
+}
+@media (max-width: 640px) {
+  .person-reference-grid {
+    grid-template-columns: 1fr;
+  }
+}
