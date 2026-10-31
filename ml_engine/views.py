@@ -12,10 +12,8 @@ from ml_engine.models import (
     PhotoYOLOIndex,
     PhotoSceneAnalysis,
 )
-from ml_engine.clip_search import create_text_embedding, cosine_similarity
 
 from galleries.models import Photo, SavedPhotoMatch
-from .face_search import extract_face_embeddings, compare_embeddings
 
 
 SIMILARITY_THRESHOLD = 0.30
@@ -26,6 +24,8 @@ class PersonSearchView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        from .face_search import extract_face_embeddings, compare_embeddings
+
         reference_file = request.FILES.get("reference_image")
 
         if not reference_file:
@@ -267,6 +267,8 @@ class SceneSearchView(APIView):
 
 
     def post(self, request):
+        from .face_search import extract_face_embeddings, compare_embeddings
+
         query = request.data.get("query", "").strip()
         event_id = request.data.get("event_id")
 
@@ -300,6 +302,7 @@ class SceneSearchView(APIView):
             photos = photos.filter(event_id=event_id)
 
         try:
+            from ml_engine.clip_search import create_text_embedding, cosine_similarity
             text_embedding = create_text_embedding(query)
         except Exception as error:
             return Response(
