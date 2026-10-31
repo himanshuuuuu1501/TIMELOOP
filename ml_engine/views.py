@@ -71,9 +71,10 @@ class PersonSearchView(APIView):
 
         for photo in photos:
             try:
-                with Image.open(photo.image.path) as stored_image:
-                    image = stored_image.convert("RGB")
-                    candidate_embeddings = extract_face_embeddings(image)
+                with photo.image.open("rb") as image_file:
+                    with Image.open(image_file) as stored_image:
+                        image = stored_image.convert("RGB")
+                        candidate_embeddings = extract_face_embeddings(image)
             except (OSError, ValueError):
                 continue
 
@@ -620,6 +621,9 @@ class PersonMomentSearchView(APIView):
     Face identities are matched to distinct detected faces in each candidate.
     Available scene analysis is then used to rank action relevance.
     """
+
+    from .face_search import extract_face_embeddings, compare_embeddings
+
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [IsAuthenticated]
 
@@ -726,8 +730,11 @@ class PersonMomentSearchView(APIView):
         for photo in photos.iterator():
             checked += 1
             try:
-                with Image.open(photo.image.path) as stored:
-                    candidate_faces = extract_face_embeddings(stored.convert("RGB"))
+                with photo.image.open("rb") as image_file:
+                    with Image.open(image_file) as stored:
+                        candidate_faces = extract_face_embeddings(
+                            stored.convert("RGB")
+                        )
             except (OSError, ValueError, UnidentifiedImageError):
                 continue
 
