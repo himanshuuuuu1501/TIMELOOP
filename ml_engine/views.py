@@ -622,7 +622,7 @@ class PersonMomentSearchView(APIView):
     Available scene analysis is then used to rank action relevance.
     """
 
-    from .face_search import extract_face_embeddings, compare_embeddings
+    
 
     parser_classes = [MultiPartParser, FormParser]
     permission_classes = [IsAuthenticated]
@@ -644,6 +644,9 @@ class PersonMomentSearchView(APIView):
     }
 
     def post(self, request):
+
+        from .face_search import extract_face_embeddings, compare_embeddings
+
         query = request.data.get("query", "").strip()
         event_id = request.data.get("event_id")
         try:

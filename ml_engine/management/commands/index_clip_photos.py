@@ -1,4 +1,3 @@
-
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
@@ -23,11 +22,16 @@ class Command(BaseCommand):
             type=int,
             help="Index photos from a specific event ID only.",
         )
+        parser.add_argument(
+            "--limit",
+            type=int,
+            help="Maximum number of photos to process.",
+        )
 
     def handle(self, *args, **options):
         photos = Photo.objects.all().order_by("id")
 
-        if options["event"]:
+        if options["event"] is not None:
             photos = photos.filter(event_id=options["event"])
 
         if not options["force"]:
@@ -37,26 +41,29 @@ class Command(BaseCommand):
                 )
             )
 
-        total = photos.count()
+        if options["limit"] is not None:
+            photos = photos[:options["limit"]]
 
+        total = photos.count()
         if total == 0:
-            self.stdout.write(
-                self.style.SUCCESS("No photos need indexing.")
-            )
+            self.stdout.write(self.style.SUCCESS("No photos need indexing."))
             return
 
         self.stdout.write(f"Photos to index: {total}")
-
         indexed = 0
         failed = 0
 
-        for number, photo in enumerate(
-            photos.iterator(chunk_size=100), 1
-        ):
+        for number, photo in enumerate(photos.iterator(chunk_size=100), 1):
             try:
-                with Image.open(photo.image.path) as source:
-                    image = ImageOps.exif_transpose(source).convert("RGB")
-                    embedding = create_image_embedding(image)
+                if not photo.image:
+                    raise FileNotFoundError("Photo has no image.")
+
+                # Use Django storage API. Remote storage (e.g. Cloudinary)
+                # does not implement FieldFile.path.
+                with photo.image.open("rb") as image_file:
+                    with Image.open(image_file) as source:
+                        image = ImageOps.exif_transpose(source).convert("RGB")
+                        embedding = create_image_embedding(image)
 
                 with transaction.atomic():
                     PhotoEmbedding.objects.update_or_create(
@@ -73,16 +80,11 @@ class Command(BaseCommand):
                     f"{photo.original_filename}"
                 )
 
-            except (
-                OSError,
-                ValueError,
-                UnidentifiedImageError,
-            ) as error:
+            except (OSError, ValueError, UnidentifiedImageError) as error:
                 failed += 1
                 self.stderr.write(
                     f"[{number}/{total}] Failed photo {photo.id}: {error}"
                 )
-
             except Exception as error:
                 failed += 1
                 self.stderr.write(
