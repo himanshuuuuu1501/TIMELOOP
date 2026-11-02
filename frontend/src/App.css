@@ -944,3 +944,134 @@ h1 em, h2 em { color: var(--accent); font-weight: 500; }
     text-align: center;
   }
 }
+
+/* iOS Safari can apply an inherited text-fill color to hero headings.
+   Explicitly set the heading fill on small screens so the first line stays dark. */
+@media (max-width: 650px) {
+  .hero .hero-copy h1 {
+    color: #292720 !important;
+    -webkit-text-fill-color: #292720 !important;
+  }
+
+  .hero .hero-copy h1 em {
+    color: #a16b54 !important;
+    -webkit-text-fill-color: #a16b54 !important;
+  }
+}
+
+/* =====================================================
+   iPhone / mobile Safari: prevent white inherited text
+   ===================================================== */
+@media screen and (max-width: 768px) {
+  :root {
+    color-scheme: light !important;
+  }
+
+  html,
+  body,
+  #root,
+  .app-shell {
+    color-scheme: light !important;
+    background: #faf9f6 !important;
+    color: #292720 !important;
+  }
+
+  /* Main content text. Explicitly set both color and WebKit fill because
+     iOS Safari can preserve a white -webkit-text-fill-color. */
+  .app-shell main h1,
+  .app-shell main h2,
+  .app-shell main h3,
+  .app-shell main h4,
+  .app-shell main h5,
+  .app-shell main h6,
+  .app-shell main p,
+  .app-shell main label,
+  .app-shell main small,
+  .app-shell main li,
+  .app-shell main strong,
+  .app-shell main .section-description,
+  .app-shell main .hero-description,
+  .app-shell main .event-caption,
+  .app-shell main .photo-card-caption,
+  .app-shell main .gallery-footer,
+  .app-shell main .person-moment-evidence,
+  .app-shell main .find-auth-note,
+  .app-shell main .feedback-message,
+  .app-shell main .moment-feedback,
+  .app-shell main .admin-empty,
+  .app-shell main .admin-event-info,
+  .app-shell main .admin-stat-card span,
+  .app-shell main .admin-card-heading,
+  .app-shell main .empty-state,
+  .app-shell main .loading-state,
+  .app-shell footer,
+  .app-shell .topbar .brand,
+  .app-shell .nav-link {
+    color: #292720 !important;
+    -webkit-text-fill-color: #292720 !important;
+  }
+
+  /* Secondary copy remains muted, not white. */
+  .app-shell main .section-description,
+  .app-shell main .hero-description,
+  .app-shell main .event-caption,
+  .app-shell main .gallery-footer,
+  .app-shell main .find-auth-note,
+  .app-shell main .person-moment-evidence,
+  .app-shell footer {
+    color: #716b65 !important;
+    -webkit-text-fill-color: #716b65 !important;
+  }
+
+  /* Preserve the site's brown editorial accents. */
+  .app-shell .eyebrow,
+  .app-shell .hero h1 em,
+  .app-shell main a:not(.brand),
+  .app-shell main .text-button,
+  .app-shell main .event-qr-panel .text-button {
+    color: #a16b54 !important;
+    -webkit-text-fill-color: #a16b54 !important;
+  }
+
+  /* Keep text on dark filled buttons white and readable. */
+  .app-shell button.primary-button,
+  .app-shell button.light-button,
+  .app-shell .primary-button,
+  .app-shell .light-button,
+  .app-shell .share-button,
+  .app-shell .app-toast {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+  }
+
+  .app-shell button.primary-button *,
+  .app-shell button.light-button *,
+  .app-shell .primary-button *,
+  .app-shell .light-button *,
+  .app-shell .share-button * {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+  }
+
+  /* Form controls need explicit text colors on iOS. */
+  .app-shell input:not([type="file"]),
+  .app-shell select,
+  .app-shell textarea {
+    color: #292720 !important;
+    -webkit-text-fill-color: #292720 !important;
+    background-color: #ffffff !important;
+    caret-color: #292720 !important;
+  }
+
+  .app-shell input::placeholder,
+  .app-shell textarea::placeholder {
+    color: #77716b !important;
+    -webkit-text-fill-color: #77716b !important;
+    opacity: 1 !important;
+  }
+
+  .app-shell select option {
+    color: #292720 !important;
+    background: #ffffff !important;
+  }
+}
