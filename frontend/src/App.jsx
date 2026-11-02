@@ -9,7 +9,7 @@ import {
 import "./App.css";
 
 // Use same-origin Vercel rewrites for all API calls. Do not set VITE_API_URL.
-const API = "";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 async function getCsrfToken() {
   const response = await fetch(`${API}/api/auth/csrf/`, {
