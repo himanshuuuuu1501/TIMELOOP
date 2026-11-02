@@ -1,9 +1,9 @@
-from rest_framework import viewsets, status
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
-from rest_framework.exceptions import PermissionDenied
 from django.core import signing
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
+from rest_framework.response import Response
 
 from .models import Event, Photo
 from .serializers import EventSerializer, PhotoSerializer
@@ -20,26 +20,22 @@ class EventViewSet(viewsets.ModelViewSet):
             permission_classes = [IsAdminUser]
         else:
             permission_classes = [IsAuthenticated]
-
         return [permission() for permission in permission_classes]
 
     @action(detail=False, methods=["post"], permission_classes=[AllowAny])
     def join(self, request):
         invitation_token = request.data.get("token", "")
         event = Event.objects.filter(join_token=invitation_token).first()
-
         if event is None:
             return Response(
                 {"error": "This event invitation is invalid or expired."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # The signed token is scoped to this event and expires after seven days.
         upload_token = signing.dumps(
             {"event_id": event.id},
             salt="timeloop-guest-upload",
         )
-
         return Response({
             "joined": True,
             "upload_token": upload_token,
@@ -69,10 +65,8 @@ class PhotoViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         event_id = self.request.query_params.get("event")
-
         if event_id:
             queryset = queryset.filter(event_id=event_id)
-
         return queryset
 
     def get_permissions(self):
@@ -82,23 +76,28 @@ class PhotoViewSet(viewsets.ModelViewSet):
             permission_classes = [IsAdminUser]
         else:
             permission_classes = [IsAuthenticated]
-
         return [permission() for permission in permission_classes]
+
+    def _save_and_process(self, serializer):
+        photo = serializer.save()
+        # Upload success is never rolled back because an AI provider is unavailable.
+        # The request waits for the three model jobs, so a successful response means
+        # processing has finished (or reports which model failed in the server log).
+        from ml_engine.photo_processing import process_uploaded_photo
+        result = process_uploaded_photo(photo)
+        self._ai_processing_result = result
+        return photo
 
     def perform_create(self, serializer):
         event = serializer.validated_data.get("event")
-
-        is_admin = (
-            self.request.user.is_authenticated
-            and self.request.user.is_staff
-        )
+        user = self.request.user
+        is_admin = user.is_authenticated and user.is_staff
 
         if is_admin:
-            serializer.save()
+            self._save_and_process(serializer)
             return
 
         upload_token = self.request.data.get("upload_token", "")
-
         try:
             token_data = signing.loads(
                 upload_token,
@@ -110,9 +109,15 @@ class PhotoViewSet(viewsets.ModelViewSet):
                 "Invalid or expired event upload permission. Please scan the event QR code again."
             )
 
-        if str(token_data.get("event_id")) != str(event.id):
+        if event is None or str(token_data.get("event_id")) != str(event.id):
             raise PermissionDenied(
                 "This invitation does not belong to the selected event."
             )
 
-        serializer.save()
+        self._save_and_process(serializer)
+
+    def create(self, request, *args, **kwargs):
+        response = super().create(request, *args, **kwargs)
+        if hasattr(self, "_ai_processing_result"):
+            response.data["ai_processing"] = self._ai_processing_result
+        return response
