@@ -10,7 +10,7 @@ import "./App.css";
 
 // Use same-origin Vercel rewrites so the browser sends Django CSRF/session cookies to Vercel.
 // frontend/vercel.json proxies /api/* to the Cloudflare Django tunnel.
-const API = "";
+const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 async function getCsrfToken() {
   const response = await fetch(`${API}/api/auth/csrf/`, {
