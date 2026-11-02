@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
   Heart, Images, Search, Upload, Sparkles, CalendarDays,
@@ -137,6 +137,18 @@ function App() {
   const [adminPhotoEvent, setAdminPhotoEvent] = useState("");
   const [eventQrLinks, setEventQrLinks] = useState({});
   const [joiningEvent, setJoiningEvent] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+  const toastTimerRef = useRef(null);
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+  }, []);
+
+  function showToast(message, duration = 2600) {
+    setToastMessage(message);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToastMessage(""), duration);
+  }
 
   const loadGallery = useCallback(async (eventId = "") => {
     setLoading(true);
@@ -696,6 +708,21 @@ function App() {
       setEventQrLinks((current) => ({ ...current, [event.id]: joinUrl }));
     } catch (err) {
       setAdminMessage(err.message || "Could not generate event QR code.");
+    }
+  }
+
+  async function copyInvitationLink(event) {
+    const link = eventQrLinks[event.id];
+    if (!link) return;
+
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard access is unavailable in this browser.");
+      }
+      await navigator.clipboard.writeText(link);
+      showToast("Invitation link copied!");
+    } catch (err) {
+      showToast(err.message || "Could not copy the invitation link.", 3200);
     }
   }
 
@@ -1267,7 +1294,11 @@ function App() {
                               <div className="event-qr-panel">
                                 <QRCodeSVG value={eventQrLinks[event.id]} size={144} level="M" />
                                 <span>Scan to join {event.name}</span>
-                                <button type="button" className="text-button" onClick={() => navigator.clipboard?.writeText(eventQrLinks[event.id])}>
+                                <button
+                                  type="button"
+                                  className="text-button"
+                                  onClick={() => copyInvitationLink(event)}
+                                >
                                   Copy invitation link
                                 </button>
                               </div>
@@ -1542,20 +1573,6 @@ function App() {
 
 
 
-
-                  <div className="moment-suggestions">
-                    <span>TRY SEARCHING</span>
-                    {["People dancing", "Someone hugging the bride", "Friends laughing together", "A cat in the wedding"].map((suggestion) => (
-                      <button
-                        type="button"
-                        className="suggestion-chip"
-                        key={suggestion}
-                        onClick={() => setSceneQuery(suggestion)}
-                      >
-                        {suggestion}
-                      </button>
-                    ))}
-                  </div>
 
                   {sceneMessage && (
                     <p className={sceneResults.length ? "moment-feedback" : "moment-feedback is-muted"} role="status">
@@ -1950,6 +1967,12 @@ function App() {
           </>
         )}
       </main>
+
+      {toastMessage && (
+        <div className="app-toast" role="status" aria-live="polite">
+          {toastMessage}
+        </div>
+      )}
 
       <footer className="footer">
         <a className="brand footer-brand" href="#home" onClick={() => setActiveTab("gallery")}>
