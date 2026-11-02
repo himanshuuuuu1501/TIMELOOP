@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://ben-selective-provisions-zum.trycloudflare.com/api/:path*"
+    }
+  ]
+}

@@ -8,7 +8,8 @@ import {
 } from "lucide-react";
 import "./App.css";
 
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+// Use same-origin Vercel rewrites for all API calls. Do not set VITE_API_URL.
+const API = "";
 
 async function getCsrfToken() {
   const response = await fetch(`${API}/api/auth/csrf/`, {

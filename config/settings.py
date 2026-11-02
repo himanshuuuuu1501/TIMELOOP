@@ -53,6 +53,8 @@ if render_hostname:
 
 # Temporary Cloudflare tunnel for the demo
 ALLOWED_HOSTS.append("ben-selective-provisions-zum.trycloudflare.com")
+if "timeloop-j2z5.vercel.app" not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append("timeloop-j2z5.vercel.app")
 
 
 # --------------------------------------------------
@@ -261,8 +263,8 @@ if "https://timeloop-j2z5.vercel.app" not in CSRF_TRUSTED_ORIGINS:
 # Required for Vercel frontend calling Cloudflare backend
 # --------------------------------------------------
 
-SESSION_COOKIE_SAMESITE = "None"
-CSRF_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
 
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
