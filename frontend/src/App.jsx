@@ -8,8 +8,9 @@ import {
 } from "lucide-react";
 import "./App.css";
 
-// Use same-origin Vercel rewrites for all API calls. Do not set VITE_API_URL.
-const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+// Use same-origin Vercel rewrites so the browser sends Django CSRF/session cookies to Vercel.
+// frontend/vercel.json proxies /api/* to the Cloudflare Django tunnel.
+const API = "";
 
 async function getCsrfToken() {
   const response = await fetch(`${API}/api/auth/csrf/`, {
