@@ -77,6 +77,7 @@ function App() {
   const [personMomentMessage, setPersonMomentMessage] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
+  const [findMessage, setFindMessage] = useState("");
 
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState(null);
@@ -85,6 +86,10 @@ function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
+
+  const [guestUploadToken, setGuestUploadToken] = useState(
+    () => localStorage.getItem("timeloop_guest_upload_token") || ""
+  );
 
   const [savedMatches, setSavedMatches] = useState([]);
   const [savedLoading, setSavedLoading] = useState(false);
@@ -216,7 +221,18 @@ function App() {
         if (cancelled) return;
         setSelectedEvent(String(data.event.id));
         setGuestJoined(true);
-        localStorage.setItem("timeloop_guest_event_id", String(data.event.id));
+
+        setGuestUploadToken(data.upload_token);
+
+        localStorage.setItem(
+          "timeloop_guest_event_id",
+          String(data.event.id)
+        );
+
+        localStorage.setItem(
+          "timeloop_guest_upload_token",
+          data.upload_token
+        );
         setActiveTab("gallery");
         setUploadMessage(data.message || `You joined ${data.event.name}. You can now upload photos.`);
         await loadGallery(String(data.event.id));
@@ -360,6 +376,15 @@ function App() {
         formData.append("event", selectedEvent);
         formData.append("image", file);
         formData.append("original_filename", file.name);
+
+        // Guest uploads are authorized with the signed token returned by QR join.
+        if (!user) {
+          const token = guestUploadToken || localStorage.getItem("timeloop_guest_upload_token") || "";
+          if (!token) {
+            throw new Error("Your event upload permission is missing. Please open the event QR invitation again.");
+          }
+          formData.append("upload_token", token);
+        }
 
         const response = await postApi(`${API}/api/photos/`, formData, true);
 
@@ -554,7 +579,7 @@ function App() {
 
     setSearching(true);
     setSearchResults([]);
-    setUploadMessage("");
+    setFindMessage("");
 
     try {
       const formData = new FormData();
@@ -580,9 +605,9 @@ function App() {
       })));
 
       await loadSavedMatches();
-      setUploadMessage(`Found ${data.results?.length || 0} matches. Matches are being saved to your account.`);
+      setFindMessage(`Found ${data.results?.length || 0} matches. Matches are being saved to your account.`);
     } catch (err) {
-      setUploadMessage(err.message);
+      setFindMessage(err.message);
     } finally {
       setSearching(false);
     }
@@ -1609,7 +1634,7 @@ function App() {
                       {!selectedEvent && (
                         <p className="feedback-message">Choose an event from the gallery filter first.</p>
                       )}
-                      <label className="primary-button file-picker">
+                      <label className={`primary-button file-picker${uploading || (!user && !guestJoined) || !selectedEvent ? " is-disabled" : ""}`}>
                         {uploading ? <LoaderCircle className="spin" size={17} /> : <Upload size={17} />}
                         {uploading ? "Uploading..." : "Choose photos"}
                         <input
@@ -1638,19 +1663,24 @@ function App() {
                       <p>Choose a clear photo of your face. Matching photos will be saved to your account.</p>
 
                       <form className="face-search-form" onSubmit={findMyPhotos}>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => setReferencePhoto(e.target.files?.[0] || null)}
-                          required
-                        />
-                        <button className="primary-button" type="submit" disabled={searching || !user}>
+                        <label className="face-photo-picker">
+                          <ImagePlus size={17} />
+                          <span>{referencePhoto ? referencePhoto.name : "Choose your face photo"}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => setReferencePhoto(e.target.files?.[0] || null)}
+                            aria-label="Choose a reference photo of your face"
+                          />
+                        </label>
+                        <button className="primary-button" type="submit" disabled={searching || !referencePhoto}>
                           {searching ? <LoaderCircle className="spin" size={17} /> : <Search size={17} />}
                           {searching ? "Finding photos..." : "Find my photos"}
                         </button>
                       </form>
 
-                      {uploadMessage && <p className="feedback-message">{uploadMessage}</p>}
+                      {!user && <p className="find-auth-note">Log in to search for your face and save matching photos to your account.</p>}
+                      {findMessage && <p className="feedback-message">{findMessage}</p>}
 
                       {searchResults.length > 0 && (
                         <div className="search-results">

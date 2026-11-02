@@ -785,3 +785,161 @@ h1 em, h2 em { color: var(--accent); font-weight: 500; }
 #gallery, #upload-panel, #find-panel, #explore-panel, #saved-panel, #admin-dashboard, #account-panel {
   scroll-margin-top: 28px;
 }
+
+/* =========================================
+   TIMELOOP MOBILE TEXT VISIBILITY FIX
+   ========================================= */
+
+:root {
+  color-scheme: light !important;
+  --ink: #292720;
+  --muted: #77716b;
+  --paper: #faf9f6;
+}
+
+html,
+body,
+#root,
+.app-shell {
+  background-color: #faf9f6 !important;
+  color: #292720 !important;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Force readable text on mobile */
+@media screen and (max-width: 650px) {
+
+  body,
+  .app-shell,
+  .auth-section,
+  .auth-card,
+  .action-panel,
+  .gallery-section,
+  .closing-banner {
+    color: #292720 !important;
+  }
+
+  /* Headings */
+  h1, h2, h3, h4, h5, h6 {
+    color: #292720 !important;
+  }
+
+  /* Paragraphs and general text */
+  p,
+  span,
+  label,
+  small,
+  li,
+  strong,
+  .hero-description,
+  .section-description,
+  .event-caption,
+  .photo-card-caption,
+  .gallery-footer,
+  .footer,
+  .auth-switch,
+  .feedback-message {
+    -webkit-text-fill-color: #292720;
+  }
+
+  /* Muted text */
+  .hero-description,
+  .section-description,
+  .event-caption,
+  .gallery-footer,
+  .footer,
+  .auth-switch {
+    color: #625e57 !important;
+  }
+
+  /* Navigation */
+  .nav-link {
+    color: #625e57 !important;
+  }
+
+  .nav-link.active {
+    color: #292720 !important;
+  }
+
+  /* Input fields */
+  input:not([type="file"]),
+  select,
+  textarea {
+    color: #292720 !important;
+    -webkit-text-fill-color: #292720 !important;
+    background-color: #ffffff !important;
+    caret-color: #292720 !important;
+    border-color: #d8d3ca;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #77716b !important;
+    -webkit-text-fill-color: #77716b !important;
+    opacity: 1 !important;
+  }
+
+  select option {
+    color: #292720 !important;
+    background-color: #ffffff !important;
+  }
+
+  /* Auth forms */
+  .auth-form label {
+    color: #292720 !important;
+  }
+
+  .auth-card {
+    background-color: #ffffff !important;
+  }
+
+  /* Panels */
+  .action-panel {
+    background-color: #faf9f6 !important;
+  }
+
+  .action-panel h3 {
+    color: #292720 !important;
+  }
+
+  /* Upload buttons */
+  .face-photo-picker {
+    color: #292720 !important;
+    background-color: #ffffff !important;
+  }
+
+  /* Preserve white text on dark buttons */
+  .primary-button,
+  .light-button {
+    color: #ffffff !important;
+    -webkit-text-fill-color: #ffffff !important;
+  }
+
+  /* Keep image overlays readable */
+  .photo-overlay {
+    color: #ffffff !important;
+  }
+}
+
+/* Prevent iOS from applying automatic dark styling */
+input,
+textarea,
+select,
+button {
+  color-scheme: light;
+}
+
+/* Find My Photos: clear account requirement for event guests */
+.find-auth-note {
+  margin: 12px 0 0;
+  color: #625e57;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+@media (max-width: 650px) {
+  .find-auth-note {
+    color: #625e57 !important;
+    -webkit-text-fill-color: #625e57 !important;
+  }
+}

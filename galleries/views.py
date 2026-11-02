@@ -1,8 +1,9 @@
-
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
+from rest_framework.exceptions import PermissionDenied
+from django.core import signing
 
 from .models import Event, Photo
 from .serializers import EventSerializer, PhotoSerializer
@@ -24,33 +25,41 @@ class EventViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["post"], permission_classes=[AllowAny])
     def join(self, request):
-        token = request.data.get("token", "")
-        event = Event.objects.filter(join_token=token).first()
-        if event is None:
-            return Response({"error": "This event invitation is invalid or expired."}, status=status.HTTP_404_NOT_FOUND)
+        invitation_token = request.data.get("token", "")
+        event = Event.objects.filter(join_token=invitation_token).first()
 
-        joined = request.session.get("joined_event_ids", [])
-        event_id = str(event.id)
-        if event_id not in joined:
-            joined.append(event_id)
-        request.session["joined_event_ids"] = joined
-        request.session.modified = True
+        if event is None:
+            return Response(
+                {"error": "This event invitation is invalid or expired."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # The signed token is scoped to this event and expires after seven days.
+        upload_token = signing.dumps(
+            {"event_id": event.id},
+            salt="timeloop-guest-upload",
+        )
 
         return Response({
             "joined": True,
+            "upload_token": upload_token,
             "event": {
                 "id": event.id,
                 "name": event.name,
                 "description": event.description,
                 "event_date": event.event_date,
             },
-            "message": f"You joined {event.name}.",
+            "message": f"You joined {event.name}. You can now upload photos.",
         })
 
     @action(detail=True, methods=["post"], permission_classes=[IsAdminUser])
     def invite(self, request, pk=None):
         event = self.get_object()
-        return Response({"event_id": event.id, "event_name": event.name, "token": str(event.join_token)})
+        return Response({
+            "event_id": event.id,
+            "event_name": event.name,
+            "token": str(event.join_token),
+        })
 
 
 class PhotoViewSet(viewsets.ModelViewSet):
@@ -78,9 +87,32 @@ class PhotoViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         event = serializer.validated_data.get("event")
-        joined_event_ids = self.request.session.get("joined_event_ids", [])
-        is_admin = self.request.user.is_authenticated and self.request.user.is_staff
-        if not is_admin and str(event.id) not in joined_event_ids:
-            from rest_framework.exceptions import PermissionDenied
-            raise PermissionDenied("Scan this event's QR code before uploading photos.")
+
+        is_admin = (
+            self.request.user.is_authenticated
+            and self.request.user.is_staff
+        )
+
+        if is_admin:
+            serializer.save()
+            return
+
+        upload_token = self.request.data.get("upload_token", "")
+
+        try:
+            token_data = signing.loads(
+                upload_token,
+                salt="timeloop-guest-upload",
+                max_age=7 * 24 * 60 * 60,
+            )
+        except signing.BadSignature:
+            raise PermissionDenied(
+                "Invalid or expired event upload permission. Please scan the event QR code again."
+            )
+
+        if str(token_data.get("event_id")) != str(event.id):
+            raise PermissionDenied(
+                "This invitation does not belong to the selected event."
+            )
+
         serializer.save()
