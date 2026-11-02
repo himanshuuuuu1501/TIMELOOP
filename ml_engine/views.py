@@ -1,9 +1,11 @@
 import itertools
 
 from PIL import Image, UnidentifiedImageError
+from django.core import signing
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -17,14 +19,82 @@ from galleries.models import Photo, SavedPhotoMatch
 
 
 SIMILARITY_THRESHOLD = 0.30
+GUEST_SEARCH_TOKEN_SALT = "timeloop-guest-upload"
+GUEST_SEARCH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60
 
 
-class PersonSearchView(APIView):
+class GuestEventSearchMixin:
+    """Allow anonymous searches only inside the event granted by its QR token."""
+
+    def scope_search_to_guest_event(self, request, photos, event_id):
+        if request.user.is_authenticated:
+            return photos, event_id
+
+        token = request.data.get("upload_token") or request.headers.get(
+            "X-Guest-Upload-Token", ""
+        )
+        if not isinstance(token, str) or not token:
+            raise PermissionDenied(
+                "Scan this event's QR invitation before searching."
+            )
+
+        try:
+            token_data = signing.loads(
+                token,
+                salt=GUEST_SEARCH_TOKEN_SALT,
+                max_age=GUEST_SEARCH_TOKEN_MAX_AGE,
+            )
+        except signing.BadSignature:
+            raise PermissionDenied(
+                "Your event access has expired or is invalid. Please scan the QR invitation again."
+            )
+
+        if not isinstance(token_data, dict):
+            raise PermissionDenied("The event invitation is not valid for this search.")
+
+        token_event_id = token_data.get("event_id")
+        if not event_id:
+            raise PermissionDenied(
+                "Guest searches must be limited to the event joined through its QR invitation."
+            )
+
+        try:
+            requested_event_id = int(event_id)
+            token_event_id = int(token_event_id)
+        except (TypeError, ValueError):
+            raise PermissionDenied("The event invitation is not valid for this search.")
+
+        if requested_event_id != token_event_id:
+            raise PermissionDenied(
+                "You can only search the event associated with your QR invitation."
+            )
+
+        return photos.filter(event_id=token_event_id), token_event_id
+
+
+class PersonSearchView(GuestEventSearchMixin, APIView):
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         from .face_search import extract_face_embeddings, compare_embeddings
+
+        # Establish the event boundary before loading or analysing any image.
+        event_id = request.data.get("event_id")
+        photos = Photo.objects.select_related("event").all()
+        if event_id:
+            try:
+                event_id = int(event_id)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "event_id must be a valid integer."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            photos = photos.filter(event_id=event_id)
+
+        photos, event_id = self.scope_search_to_guest_event(
+            request, photos, event_id
+        )
 
         reference_file = request.FILES.get("reference_image")
 
@@ -52,21 +122,6 @@ class PersonSearchView(APIView):
 
         reference_embedding = reference_embeddings[0]
 
-        # Optionally limit the search to one wedding event.
-        event_id = request.data.get("event_id")
-        photos = Photo.objects.select_related("event").all()
-
-        if event_id:
-            try:
-                event_id = int(event_id)
-            except (TypeError, ValueError):
-                return Response(
-                    {"error": "event_id must be a valid integer."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            photos = photos.filter(event_id=event_id)
-
         results = []
 
         for photo in photos:
@@ -89,12 +144,15 @@ class PersonSearchView(APIView):
             if best_score < SIMILARITY_THRESHOLD:
                 continue
 
-            # Persist the match for the authenticated user.
-            saved_match, created = SavedPhotoMatch.objects.update_or_create(
-                user=request.user,
-                photo=photo,
-                defaults={"similarity": round(best_score, 4)},
-            )
+            # Persist matches only when an account is authenticated.
+            is_saved = False
+            if request.user.is_authenticated:
+                SavedPhotoMatch.objects.update_or_create(
+                    user=request.user,
+                    photo=photo,
+                    defaults={"similarity": round(best_score, 4)},
+                )
+                is_saved = True
 
             results.append({
                 "photo_id": photo.id,
@@ -103,7 +161,7 @@ class PersonSearchView(APIView):
                 "filename": photo.original_filename,
                 "image_url": request.build_absolute_uri(photo.image.url),
                 "similarity": round(best_score, 4),
-                "saved": True,
+                "saved": is_saved,
             })
 
         results.sort(
@@ -111,20 +169,18 @@ class PersonSearchView(APIView):
             reverse=True,
         )
 
+        is_authenticated = request.user.is_authenticated
         return Response({
-            "message": "Person search completed and matches saved.",
+            "message": (
+                "Person search completed and matches saved."
+                if is_authenticated else "Guest person search completed."
+            ),
             "event_id": event_id,
             "photos_checked": photos.count(),
-            "matches_saved": len(results),
+            "matches_found": len(results),
+            "matches_saved": len(results) if is_authenticated else 0,
             "results": results[:50],
         })
-
-
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
-from galleries.models import SavedPhotoMatch
 
 
 class SavedMatchesView(APIView):
@@ -164,8 +220,8 @@ class SavedMatchesView(APIView):
 import re
 
 
-class SceneSearchView(APIView):
-    permission_classes = [IsAuthenticated]
+class SceneSearchView(GuestEventSearchMixin, APIView):
+    permission_classes = [AllowAny]
 
     # Maps natural-language object names to YOLO's COCO class names.
     OBJECT_ALIASES = {
@@ -301,6 +357,10 @@ class SceneSearchView(APIView):
                 )
 
             photos = photos.filter(event_id=event_id)
+
+        photos, event_id = self.scope_search_to_guest_event(
+            request, photos, event_id
+        )
 
         try:
             from ml_engine.clip_search import create_text_embedding, cosine_similarity
@@ -615,7 +675,7 @@ class SceneSearchView(APIView):
             })
 
 
-class PersonMomentSearchView(APIView):
+class PersonMomentSearchView(GuestEventSearchMixin, APIView):
     """
     Find photos containing every selected reference identity.
     Face identities are matched to distinct detected faces in each candidate.
@@ -625,7 +685,7 @@ class PersonMomentSearchView(APIView):
     
 
     parser_classes = [MultiPartParser, FormParser]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     ACTION_GROUPS = {
         "hugging": {"hug", "hugs", "hugging", "embrace", "embracing", "cuddle", "cuddling"},
@@ -649,6 +709,21 @@ class PersonMomentSearchView(APIView):
 
         query = request.data.get("query", "").strip()
         event_id = request.data.get("event_id")
+        photos = Photo.objects.select_related("event").all()
+        if event_id:
+            try:
+                event_id = int(event_id)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": "event_id must be a valid integer."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            photos = photos.filter(event_id=event_id)
+
+        photos, event_id = self.scope_search_to_guest_event(
+            request, photos, event_id
+        )
+
         try:
             requested_count = int(request.data.get("person_count", 0))
         except (TypeError, ValueError):
@@ -700,16 +775,6 @@ class PersonMomentSearchView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             references.append(detected[0])
-
-        photos = Photo.objects.select_related("event").all()
-        if event_id:
-            try:
-                photos = photos.filter(event_id=int(event_id))
-            except (TypeError, ValueError):
-                return Response(
-                    {"error": "event_id must be a valid integer."},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
 
         analyses = {
             item.photo_id: item

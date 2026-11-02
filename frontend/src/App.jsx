@@ -33,6 +33,32 @@ async function postApi(url, payload, isFormData = false) {
   });
 }
 
+// Guest searches use the signed event token, not Django session/CSRF cookies.
+// This avoids cross-site cookie restrictions on iOS browsers.
+async function postGuestSearchApi(url, payload, isFormData = false) {
+  const uploadToken = localStorage.getItem("timeloop_guest_upload_token") || "";
+  if (!uploadToken) {
+    throw new Error("Scan this event's QR invitation before searching.");
+  }
+
+  let body;
+  const headers = {};
+  if (isFormData) {
+    payload.append("upload_token", uploadToken);
+    body = payload;
+  } else {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify({ ...payload, upload_token: uploadToken });
+  }
+
+  return fetch(url, {
+    method: "POST",
+    credentials: "omit",
+    headers,
+    body,
+  });
+}
+
 async function mutateApi(url, method, payload) {
   const csrfToken = await getCsrfToken();
   return fetch(url, {
@@ -481,16 +507,20 @@ function App() {
       setSceneMessage("Describe a moment to start searching.");
       return;
     }
+    if (!user && (!guestJoined || !selectedEvent)) {
+      setSceneMessage("Join an event through its QR invitation before searching.");
+      return;
+    }
 
     setSceneSearching(true);
     setSceneMessage("");
     setSceneResults([]);
 
     try {
-      const response = await postApi(`${API}/api/search/scene-search/`, {
-        query,
-        event_id: selectedEvent || null,
-      });
+      const searchPayload = { query, event_id: selectedEvent || null };
+      const response = user
+        ? await postApi(`${API}/api/search/scene-search/`, searchPayload)
+        : await postGuestSearchApi(`${API}/api/search/scene-search/`, searchPayload);
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
@@ -527,6 +557,10 @@ function App() {
       setPersonMomentMessage("Describe the moment you want to find.");
       return;
     }
+    if (!user && (!guestJoined || !selectedEvent)) {
+      setPersonMomentMessage("Join an event through its QR invitation before searching.");
+      return;
+    }
 
     setPersonMomentBusy(true);
     setPersonMomentMessage("");
@@ -541,11 +575,17 @@ function App() {
       formData.append("query", personMomentQuery.trim());
       if (selectedEvent) formData.append("event_id", selectedEvent);
 
-      const response = await postApi(
-        `${API}/api/search/person-moment-search/`,
-        formData,
-        true
-      );
+      const response = user
+        ? await postApi(
+            `${API}/api/search/person-moment-search/`,
+            formData,
+            true
+          )
+        : await postGuestSearchApi(
+            `${API}/api/search/person-moment-search/`,
+            formData,
+            true
+          );
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data.error || data.detail || "Person + moment search failed.");
@@ -571,9 +611,8 @@ function App() {
   async function findMyPhotos(event) {
     event.preventDefault();
 
-    if (!user) {
-      setAuthMessage("Please log in before searching and saving matches.");
-      setActiveTab("account");
+    if (!user && (!guestJoined || !selectedEvent)) {
+      setFindMessage("Join an event through its QR invitation before searching.");
       return;
     }
 
@@ -589,11 +628,17 @@ function App() {
 
       if (selectedEvent) formData.append("event_id", selectedEvent);
 
-      const response = await postApi(
-        `${API}/api/search/person-search/`,
-        formData,
-        true
-      );
+      const response = user
+        ? await postApi(
+            `${API}/api/search/person-search/`,
+            formData,
+            true
+          )
+        : await postGuestSearchApi(
+            `${API}/api/search/person-search/`,
+            formData,
+            true
+          );
 
       const data = await response.json();
 
@@ -606,8 +651,12 @@ function App() {
         imageUrl: photo.image_url,
       })));
 
-      await loadSavedMatches();
-      setFindMessage(`Found ${data.results?.length || 0} matches. Matches are being saved to your account.`);
+      if (user) {
+        await loadSavedMatches();
+        setFindMessage(`Found ${data.results?.length || 0} matches. Matches are being saved to your account.`);
+      } else {
+        setFindMessage(`Found ${data.results?.length || 0} possible matches in this event. Guest searches are not saved to an account.`);
+      }
     } catch (err) {
       setFindMessage(err.message);
     } finally {
@@ -933,15 +982,17 @@ function App() {
           >
             Explore Moments
           </button>
-          <button
-            className={activeTab === "saved" ? "nav-link active" : "nav-link"}
-            onClick={() => {
-              setActiveTab("saved");
-              loadSavedMatches();
-            }}
-          >
-            My Memories
-          </button>
+          {user && (
+            <button
+              className={activeTab === "saved" ? "nav-link active" : "nav-link"}
+              onClick={() => {
+                setActiveTab("saved");
+                loadSavedMatches();
+              }}
+            >
+              My Memories
+            </button>
+          )}
           {user?.is_admin && (
             <button
               className={activeTab === "admin" ? "nav-link active" : "nav-link"}
@@ -1465,19 +1516,26 @@ function App() {
                       </button>
                     </div>
                     <div className="moment-search-options">
-                      <label className="event-select-label">
-                        <CalendarDays size={16} />
-                        <select
-                          value={selectedEvent}
-                          onChange={(e) => setSelectedEvent(e.target.value)}
-                          aria-label="Limit moment search to an event"
-                        >
-                          <option value="">All events</option>
-                          {events.map((event) => (
-                            <option key={event.id} value={event.id}>{event.name}</option>
-                          ))}
-                        </select>
-                      </label>
+                      {user ? (
+                        <label className="event-select-label">
+                          <CalendarDays size={16} />
+                          <select
+                            value={selectedEvent}
+                            onChange={(e) => setSelectedEvent(e.target.value)}
+                            aria-label="Limit moment search to an event"
+                          >
+                            <option value="">All events</option>
+                            {events.map((event) => (
+                              <option key={event.id} value={event.id}>{event.name}</option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : (
+                        <span className="event-select-label">
+                          <CalendarDays size={16} />
+                          {currentEvent?.name || "Your joined event"}
+                        </span>
+                      )}
                       <span>Search by people, actions, emotions or objects</span>
                     </div>
                   </form>
@@ -1715,8 +1773,11 @@ function App() {
                           onChange={(e) => chooseEvent(e.target.value)}
                           aria-label="Choose wedding event"
                         >
-                          <option value="">All events</option>
-                          {events.map((event) => (
+                          {user && <option value="">All events</option>}
+                          {(user
+                            ? events
+                            : events.filter((event) => String(event.id) === String(selectedEvent))
+                          ).map((event) => (
                             <option key={event.id} value={event.id}>{event.name}</option>
                           ))}
                         </select>
@@ -1774,7 +1835,7 @@ function App() {
                       </button>
                       <Search size={25} />
                       <h3>Find yourself in the memories</h3>
-                      <p>Choose a clear photo of your face. Matching photos will be saved to your account.</p>
+                      <p>Choose a clear photo of your face to find matching photos in the selected event.</p>
 
                       <form className="face-search-form" onSubmit={findMyPhotos}>
                         <label className="face-photo-picker">
@@ -1793,7 +1854,7 @@ function App() {
                         </button>
                       </form>
 
-                      {!user && <p className="find-auth-note">Log in to search for your face and save matching photos to your account.</p>}
+                      {!user && <p className="find-auth-note">Guest searches are limited to the event you joined through its QR invitation. Results are not saved to an account.</p>}
                       {findMessage && <p className="feedback-message">{findMessage}</p>}
 
                       {searchResults.length > 0 && (
@@ -1814,15 +1875,17 @@ function App() {
                               </article>
                             ))}
                           </div>
-                          <button
-                            className="outline-button"
-                            onClick={() => {
-                              setActiveTab("saved");
-                              loadSavedMatches();
-                            }}
-                          >
-                            View My Memories
-                          </button>
+                          {user && (
+                            <button
+                              className="outline-button"
+                              onClick={() => {
+                                setActiveTab("saved");
+                                loadSavedMatches();
+                              }}
+                            >
+                              View My Memories
+                            </button>
+                          )}
                         </div>
                       )}
                     </section>
