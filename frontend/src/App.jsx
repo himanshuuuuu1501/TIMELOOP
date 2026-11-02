@@ -968,7 +968,17 @@ function App() {
               </button>
             </>
           ) : (
-            <span className="guest-access-label">Guest access</span>
+            <button
+              className="share-button"
+              onClick={() => {
+                setAuthMode("login");
+                setAuthMessage("");
+                setActiveTab("account");
+              }}
+            >
+              <LogIn size={16} />
+              <span>Log in / Sign up</span>
+            </button>
           )}
         </div>
       </header>
@@ -977,12 +987,114 @@ function App() {
         {activeTab === "account" ? (
           <section className="auth-section" id="account-panel">
             <div className="auth-card">
-              <div className="eyebrow"><Heart size={14} /> YOUR MEMORIES, YOUR ACCOUNT</div>
-              <h1>Welcome <em>back.</em></h1>
-              <p className="section-description">
-                {user ? `You are signed in as ${user.username}.` : "You joined this event as a guest. Sign in to use personal photo search and saved memories."}
-              </p>
-              {authMessage && <p className="feedback-message">{authMessage}</p>}
+              <div className="eyebrow">
+                <Heart size={14} /> YOUR MEMORIES, YOUR ACCOUNT
+              </div>
+
+              <h1>
+                {user ? (
+                  <>Welcome <em>{user.username}.</em></>
+                ) : authMode === "login" ? (
+                  <>Welcome <em>back.</em></>
+                ) : (
+                  <>Join <em>TIMELOOP.</em></>
+                )}
+              </h1>
+
+              {user ? (
+                <>
+                  <p className="section-description">
+                    You are signed in as {user.username}.
+                  </p>
+                  <button
+                    className="primary-button"
+                    onClick={() => setActiveTab("gallery")}
+                  >
+                    Back to gallery
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="section-description">
+                    Log in or create an account to find yourself in wedding
+                    photos and save your favourite memories.
+                  </p>
+
+                  <form className="auth-form" onSubmit={submitAuth}>
+                    <label>
+                      Username
+                      <input
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        autoComplete="username"
+                        required
+                      />
+                    </label>
+
+                    {authMode === "register" && (
+                      <label>
+                        Email
+                        <input
+                          type="email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          autoComplete="email"
+                          required
+                        />
+                      </label>
+                    )}
+
+                    <label>
+                      Password
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        autoComplete={
+                          authMode === "register"
+                            ? "new-password"
+                            : "current-password"
+                        }
+                        minLength={authMode === "register" ? 8 : undefined}
+                        required
+                      />
+                    </label>
+
+                    <button className="primary-button" type="submit">
+                      {authMode === "login" ? (
+                        <><LogIn size={16} /> Log in</>
+                      ) : (
+                        <><UserPlus size={16} /> Create account</>
+                      )}
+                    </button>
+                  </form>
+
+                  {authMessage && (
+                    <p className="feedback-message">{authMessage}</p>
+                  )}
+
+                  <p className="auth-switch">
+                    {authMode === "login"
+                      ? "New to TIMELOOP?"
+                      : "Already have an account?"}
+
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => {
+                        setAuthMode(
+                          authMode === "login" ? "register" : "login"
+                        );
+                        setAuthMessage("");
+                      }}
+                    >
+                      {authMode === "login"
+                        ? "Create an account"
+                        : "Log in instead"}
+                    </button>
+                  </p>
+                </>
+              )}
             </div>
           </section>
         ) : activeTab === "admin" && user?.is_admin ? (
