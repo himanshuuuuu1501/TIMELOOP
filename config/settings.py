@@ -52,7 +52,7 @@ if render_hostname:
     ALLOWED_HOSTS.append(render_hostname)
 
 # Temporary Cloudflare tunnel for the demo
-ALLOWED_HOSTS.append("ben-selective-provisions-zum.trycloudflare.com")
+ALLOWED_HOSTS.append("collar-copyright-framing-tobago.trycloudflare.com")
 if "timeloop-j2z5.vercel.app" not in ALLOWED_HOSTS:
     ALLOWED_HOSTS.append("timeloop-j2z5.vercel.app")
 
